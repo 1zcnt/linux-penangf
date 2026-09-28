@@ -46,6 +46,9 @@ properties:
               - mediatek,mt8365-wdt
               - mediatek,mt8516-wdt
           - const: mediatek,mt6589-wdt
+      - items:
+          - const: mediatek,mt6768-wdt
+          - const: mediatek,mt8183-wdt
 
   reg:
     maxItems: 1

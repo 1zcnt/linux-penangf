@@ -14,6 +14,13 @@ obj-$(CONFIG_COMMON_CLK_MT6765_IMGSYS) += clk-mt6765-img.o
 obj-$(CONFIG_COMMON_CLK_MT6765_MIPI0ASYS) += clk-mt6765-mipi0a.o
 obj-$(CONFIG_COMMON_CLK_MT6765_MMSYS) += clk-mt6765-mm.o
 obj-$(CONFIG_COMMON_CLK_MT6765_VCODECSYS) += clk-mt6765-vcodec.o
+obj-$(CONFIG_COMMON_CLK_MT6768) += clk-mt6768-apmixedsys.o clk-mt6768-topckgen.o \
+				   clk-mt6768-infracfg.o
+obj-$(CONFIG_COMMON_CLK_MT6768_AUDIOSYS) += clk-mt6768-audio.o
+obj-$(CONFIG_COMMON_CLK_MT6768_CAMSYS) += clk-mt6768-cam.o
+obj-$(CONFIG_COMMON_CLK_MT6768_IMGSYS) += clk-mt6768-img.o
+obj-$(CONFIG_COMMON_CLK_MT6768_GCE) += clk-mt6768-gce.o
+obj-$(CONFIG_COMMON_CLK_MT6768_MCUCFG) += clk-mt6768-mcu.o
 obj-$(CONFIG_COMMON_CLK_MT6779) += clk-mt6779.o
 obj-$(CONFIG_COMMON_CLK_MT6779_MMSYS) += clk-mt6779-mm.o
 obj-$(CONFIG_COMMON_CLK_MT6779_IMGSYS) += clk-mt6779-img.o

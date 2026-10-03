@@ -247,6 +247,50 @@ config COMMON_CLK_MT6765_MIPI2BSYS
        help
          This driver supports MediaTek MT6765 mipi2bsys clocks.
 
+config COMMON_CLK_MT6768
+	tristate "Clock driver for MediaTek MT6768"
+	depends on (ARCH_MEDIATEK && ARM64) || COMPILE_TEST
+	select COMMON_CLK_MEDIATEK
+	select COMMON_CLK_MT8183
+	default ARCH_MEDIATEK && ARM64
+	help
+	  This driver supports MediaTek MT6768 basic clocks.
+
+config COMMON_CLK_MT6768_AUDIOSYS
+	tristate "Clock driver for MediaTek MT6768 audiosys"
+	depends on COMMON_CLK_MT6768
+	default COMMON_CLK_MT6768
+	help
+	  This driver supports MediaTek MT6768 audiosys clocks.
+
+config COMMON_CLK_MT6768_CAMSYS
+	tristate "Clock driver for MediaTek MT6768 camsys"
+	depends on COMMON_CLK_MT6768
+	default COMMON_CLK_MT6768
+	help
+	  This driver supports MediaTek MT6768 camsys clocks.
+
+config COMMON_CLK_MT6768_IMGSYS
+	tristate "Clock driver for MediaTek MT6768 imgsys"
+	depends on COMMON_CLK_MT6768
+	default COMMON_CLK_MT6768
+	help
+	  This driver supports MediaTek MT6768 imgsys clocks.
+
+config COMMON_CLK_MT6768_GCE
+	tristate "Clock driver for MediaTek MT6768 GCE"
+	depends on COMMON_CLK_MT6768
+	default COMMON_CLK_MT6768
+	help
+	  This driver supports MediaTek MT6768 GCE clocks.
+
+config COMMON_CLK_MT6768_MCUCFG
+	tristate "Clock driver for MediaTek MT6768 mcucfg"
+	depends on COMMON_CLK_MT6768
+	default COMMON_CLK_MT6768
+	help
+	  This driver supports MediaTek MT6768 mcucfg clocks.
+
 config COMMON_CLK_MT6779
 	tristate "Clock driver for MediaTek MT6779"
 	depends on (ARCH_MEDIATEK && ARM64) || COMPILE_TEST

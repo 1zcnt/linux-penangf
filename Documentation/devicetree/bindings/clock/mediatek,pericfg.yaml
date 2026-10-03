@@ -38,6 +38,10 @@ properties:
           - const: mediatek,mt7623-pericfg
           - const: mediatek,mt2701-pericfg
           - const: syscon
+      - items:
+          - const: mediatek,mt6768-pericfg
+          - const: mediatek,mt8183-pericfg
+          - const: syscon
 
   reg:
     maxItems: 1

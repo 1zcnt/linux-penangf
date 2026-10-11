@@ -1062,6 +1062,14 @@ config CHARGER_SURFACE
 	  Microsoft Surface devices, i.e. Surface Pro 7, Surface Laptop 3,
 	  Surface Book 3, and Surface Laptop Go.
 
+config BATTERY_MT6358
+	tristate "MediaTek MT6358 PMIC battery monitor"
+	depends on MFD_MT6397 && IIO
+	select ADC_BATTERY_HELPER
+	help
+	  Battery voltage, current and an open-circuit-voltage based state of
+	  charge estimate from the fuel-gauge ADC of the MT6358 PMIC.
+
 config BATTERY_UG3105
 	tristate "uPI uG3105 battery monitor driver"
 	depends on I2C

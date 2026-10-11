@@ -33,6 +33,7 @@
 #include "mtk_drm_drv.h"
 
 #define DSI_START		0x00
+#define VM_CMD_START			BIT(16)
 
 #define DSI_INTEN		0x08
 
@@ -41,6 +42,7 @@
 #define CMD_DONE_INT_FLAG		BIT(1)
 #define TE_RDY_INT_FLAG			BIT(2)
 #define VM_DONE_INT_FLAG		BIT(3)
+#define VM_CMD_DONE_INT_FLAG		BIT(5)
 #define EXT_TE_RDY_INT_FLAG		BIT(4)
 #define DSI_BUSY			BIT(31)
 
@@ -141,7 +143,11 @@
 
 /* DSI_VM_CMD_CON */
 #define VM_CMD_EN			BIT(0)
+#define VM_LONG_PACKET			BIT(1)
 #define TS_VFP_EN			BIT(5)
+/* Payload registers follow DSI_VM_CMD_CON; the first block holds 16 bytes */
+#define VM_CMD_DATA_OFF			0x4
+#define VM_CMD_DATA_MAX			16
 
 /* DSI_SHADOW_DEBUG */
 #define FORCE_COMMIT			BIT(0)
@@ -205,6 +211,7 @@ struct mtk_dsi {
 	struct phy *phy;
 
 	void __iomem *regs;
+	int irq;
 
 	struct clk *engine_clk;
 	struct clk *digital_clk;
@@ -718,12 +725,26 @@ static int mtk_dsi_poweron(struct mtk_dsi *dsi)
 		       dsi->regs + dsi->driver_data->reg_shadow_dbg_off);
 
 	mtk_dsi_reset_engine(dsi);
+
+	/*
+	 * A bootloader that leaves the display running hands the host over in
+	 * video mode, and the engine reset does not clear that. The first
+	 * command transfer would then try to stop a video stream that is no
+	 * longer running and time out waiting for its VM_DONE interrupt.
+	 */
+	mtk_dsi_stop(dsi);
+	mtk_dsi_set_cmd_mode(dsi);
+
 	mtk_dsi_phy_timconfig(dsi);
 
 	mtk_dsi_ps_control(dsi, true);
 	mtk_dsi_set_vm_cmd(dsi);
 	mtk_dsi_config_vdo_timing(dsi);
 	mtk_dsi_set_interrupt_enable(dsi);
+
+	/* Drop whatever was latched before the engine was reset */
+	writel(0, dsi->regs + DSI_INTSTA);
+	enable_irq(dsi->irq);
 
 	return 0;
 err_disable_engine_clk:
@@ -754,6 +775,7 @@ static void mtk_dsi_poweroff(struct mtk_dsi *dsi)
 
 	mtk_dsi_switch_to_cmd_mode(dsi, VM_DONE_INT_FLAG, 500);
 	mtk_dsi_reset_engine(dsi);
+	disable_irq(dsi->irq);
 	mtk_dsi_lane0_ulp_mode_enter(dsi);
 	mtk_dsi_clk_ulp_mode_enter(dsi);
 	/* set the lane number as 0 to pull down mipi */
@@ -1119,6 +1141,52 @@ static ssize_t mtk_dsi_host_send_cmd(struct mtk_dsi *dsi,
 		return 0;
 }
 
+/*
+ * Send a write while the video stream keeps running: the engine inserts the
+ * packet into the vertical front porch. Dropping to command mode instead (as
+ * mtk_dsi_host_transfer() does otherwise) only works while nothing is feeding
+ * the DSI yet; with the display pipeline running the command never completes
+ * and the recovery from that leaves the stream dead.
+ */
+static int mtk_dsi_host_send_vm_cmd(struct mtk_dsi *dsi,
+				    const struct mipi_dsi_msg *msg)
+{
+	u32 reg_vm_cmd_off = dsi->driver_data->reg_vm_cmd_off;
+	const u8 *tx_buf = msg->tx_buf;
+	u32 val, status;
+	int i, j, ret;
+
+	if (msg->tx_len > 2) {
+		for (i = 0; i < msg->tx_len; i += 4) {
+			val = 0;
+			for (j = 0; j < 4 && i + j < msg->tx_len; j++)
+				val |= tx_buf[i + j] << (8 * j);
+			writel(val, dsi->regs + reg_vm_cmd_off +
+				    VM_CMD_DATA_OFF + i);
+		}
+		val = (msg->tx_len << 16) | (msg->type << 8) | VM_LONG_PACKET;
+	} else if (msg->tx_len == 2) {
+		val = (tx_buf[1] << 24) | (tx_buf[0] << 16) | (msg->type << 8);
+	} else {
+		val = (tx_buf[0] << 16) | (msg->type << 8);
+	}
+
+	writel(val | VM_CMD_EN | TS_VFP_EN, dsi->regs + reg_vm_cmd_off);
+
+	mtk_dsi_mask(dsi, DSI_INTSTA, VM_CMD_DONE_INT_FLAG, 0);
+	mtk_dsi_mask(dsi, DSI_START, VM_CMD_START, 0);
+	mtk_dsi_mask(dsi, DSI_START, VM_CMD_START, VM_CMD_START);
+
+	ret = readl_poll_timeout(dsi->regs + DSI_INTSTA, status,
+				 status & VM_CMD_DONE_INT_FLAG, 500, 200000);
+	if (ret)
+		DRM_WARN("DSI video mode command timeout\n");
+
+	mtk_dsi_mask(dsi, DSI_START, VM_CMD_START, 0);
+
+	return ret;
+}
+
 static ssize_t mtk_dsi_host_transfer(struct mipi_dsi_host *host,
 				     const struct mipi_dsi_msg *msg)
 {
@@ -1131,6 +1199,11 @@ static ssize_t mtk_dsi_host_transfer(struct mipi_dsi_host *host,
 	int ret, i;
 
 	dsi_mode = readl(dsi->regs + DSI_MODE_CTRL);
+	if ((dsi_mode & MODE) && dsi->enabled && msg->tx_len &&
+	    !MTK_DSI_HOST_IS_READ(msg->type) &&
+	    msg->tx_len <= VM_CMD_DATA_MAX)
+		return mtk_dsi_host_send_vm_cmd(dsi, msg);
+
 	if (dsi_mode & MODE) {
 		mtk_dsi_stop(dsi);
 		ret = mtk_dsi_switch_to_cmd_mode(dsi, VM_DONE_INT_FLAG, 500);
@@ -1144,8 +1217,14 @@ static ssize_t mtk_dsi_host_transfer(struct mipi_dsi_host *host,
 	mtk_dsi_lane_ready(dsi);
 
 	ret = mtk_dsi_host_send_cmd(dsi, msg, irq_flag);
-	if (ret)
+	if (ret) {
+		dev_warn(host->dev,
+			 "command %02x failed: mode %x enabled %d refcount %d intsta %08x\n",
+			 msg->tx_len ? *(const u8 *)msg->tx_buf : 0, dsi_mode,
+			 dsi->enabled, dsi->refcount,
+			 readl(dsi->regs + DSI_INTSTA));
 		goto restore_dsi_mode;
+	}
 
 	if (!MTK_DSI_HOST_IS_READ(msg->type)) {
 		recv_cnt = 0;
@@ -1236,12 +1315,20 @@ static int mtk_dsi_probe(struct platform_device *pdev)
 	if (irq_num < 0)
 		return irq_num;
 
+	init_waitqueue_head(&dsi->irq_wait_queue);
+
+	/*
+	 * Keep the interrupt off until mtk_dsi_poweron() has reset the engine
+	 * and programmed DSI_INTEN. A bootloader that leaves the display on
+	 * hands the host over streaming video with its own interrupt enables,
+	 * and mtk_dsi_irq() spins for as long as the engine reports busy, which
+	 * with video running is forever: a hard lockup in interrupt context.
+	 */
+	dsi->irq = irq_num;
 	ret = devm_request_irq(&pdev->dev, irq_num, mtk_dsi_irq,
-			       IRQF_TRIGGER_NONE, dev_name(&pdev->dev), dsi);
+			       IRQF_NO_AUTOEN, dev_name(&pdev->dev), dsi);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret, "Failed to request DSI irq\n");
-
-	init_waitqueue_head(&dsi->irq_wait_queue);
 
 	platform_set_drvdata(pdev, dsi);
 

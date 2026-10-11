@@ -19,7 +19,7 @@ DECLARE_CRC8_TABLE(aw_crc8_table);
 static char *profile_name[AW88395_PROFILE_MAX] = {
 	"Music", "Voice", "Voip", "Ringtone",
 	"Ringtone_hs", "Lowpower", "Bypass",
-	"Mmi", "Fm", "Notification", "Receiver"
+	"Mmi", "Fm", "Notification", "Receiver", "Off"
 };
 
 static int aw_parse_bin_header(struct aw_device *aw_dev, struct aw_bin *bin);
@@ -163,9 +163,14 @@ static int aw_parse_one_of_multi_bins(struct aw_device *aw_dev, unsigned int bin
 	unsigned int bin_start_addr;
 	unsigned int valid_data_len;
 
-	if (bin->info.len < sizeof(struct bin_header_info)) {
+	/*
+	 * Compare against the header as stored in the file, not the larger
+	 * in-memory description of it: a profile of a few register writes
+	 * (the AW87xxx power-down one is 66 bytes) is otherwise rejected.
+	 */
+	if (bin->info.len < HEADER_LEN) {
 		dev_err(aw_dev->dev, "bin_header_info size[%d] overflow file size[%d]\n",
-				(int)sizeof(struct bin_header_info), bin->info.len);
+				HEADER_LEN, bin->info.len);
 		return -EINVAL;
 	}
 
@@ -213,9 +218,14 @@ static int aw_parse_bin_header(struct aw_device *aw_dev, struct aw_bin *bin)
 {
 	unsigned int bin_data_type;
 
-	if (bin->info.len < sizeof(struct bin_header_info)) {
+	/*
+	 * Compare against the header as stored in the file, not the larger
+	 * in-memory description of it: a profile of a few register writes
+	 * (the AW87xxx power-down one is 66 bytes) is otherwise rejected.
+	 */
+	if (bin->info.len < HEADER_LEN) {
 		dev_err(aw_dev->dev, "bin_header_info size[%d] overflow file size[%d]\n",
-				(int)sizeof(struct bin_header_info), bin->info.len);
+				HEADER_LEN, bin->info.len);
 		return -EINVAL;
 	}
 

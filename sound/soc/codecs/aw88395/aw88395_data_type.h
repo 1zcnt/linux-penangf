@@ -64,6 +64,7 @@ enum aw_prof_type {
 	AW88395_PROFILE_FM,
 	AW88395_PROFILE_NOTIFICATION,
 	AW88395_PROFILE_RECEIVER,
+	AW88395_PROFILE_OFF,	/* power-down settings, in profiles made for AW87xxx */
 	AW88395_PROFILE_MAX,
 };
 

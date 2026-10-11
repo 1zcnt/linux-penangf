@@ -1340,6 +1340,135 @@ static int mt_hp_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+/*
+ * Line output on its own (LOL fed from DAC R), as used with an external
+ * speaker amplifier. Without this the path only switched the output buffer
+ * on and relied on the headphone or receiver sequence to power the charge
+ * pump, the LDOs and the DAC. Sequence taken from MediaTek's downstream
+ * driver.
+ */
+static int mt_lo_event(struct snd_soc_dapm_widget *w,
+		       struct snd_kcontrol *kcontrol,
+		       int event)
+{
+	struct snd_soc_component *cmpnt = snd_soc_dapm_to_component(w->dapm);
+	struct mt6358_priv *priv = snd_soc_component_get_drvdata(cmpnt);
+	int gain = priv->ana_gain[AUDIO_ANALOG_VOLUME_LINEOUTL];
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		/* Reduce ESD resistance of AU_REFN */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON2, 0x4000);
+		/* Turn on DA_600K_NCP_VA18 */
+		regmap_write(priv->regmap, MT6358_AUDNCP_CLKDIV_CON1, 0x0001);
+		/* Set NCP clock as 604kHz // 26MHz/43 = 604KHz */
+		regmap_write(priv->regmap, MT6358_AUDNCP_CLKDIV_CON2, 0x002c);
+		/* Toggle RG_DIVCKS_CHG */
+		regmap_write(priv->regmap, MT6358_AUDNCP_CLKDIV_CON0, 0x0001);
+		/* Set NCP soft start mode as default mode: 100us */
+		regmap_write(priv->regmap, MT6358_AUDNCP_CLKDIV_CON4, 0x0003);
+		/* Enable NCP */
+		regmap_write(priv->regmap, MT6358_AUDNCP_CLKDIV_CON3, 0x0000);
+		usleep_range(250, 270);
+		/* Enable cap-less LDOs (1.5V) */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON14,
+				   0x1055, 0x1055);
+		/* Enable NV regulator (-1.2V) */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON15, 0x0001);
+		usleep_range(100, 120);
+		/* Enable AUD_ZCD for the line output */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON11,
+				   0x7, 0x0);
+		regmap_update_bits(priv->regmap, MT6358_ZCD_CON0,
+				   0x7ff, 0x010b);
+		/* Disable lineout short-circuit protection */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1 << 4, 0x1 << 4);
+		/* Set LO gain to -10dB */
+		regmap_write(priv->regmap, MT6358_ZCD_CON1, DL_GAIN_N_10DB_REG);
+		/* Enable IBIST */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON12, 0x0055);
+		/* Set HP DR bias current optimization, 010: 6uA */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON11,
+				   0xff80, 0x4900);
+		/* Set HP & ZCD bias current optimization */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON12, 0x0055);
+		/* Set LO STB enhance circuits */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1 << 8, 0x1 << 8);
+		/* Disable HP main CMFB loop */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON9, 0x0000);
+		/* Select CMFB resistor bulk to AC mode, default HS/LO cap size */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON10, 0x0000);
+		/* Enable LO driver bias circuits */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1 << 1, 0x1 << 1);
+		/* Enable LO driver core circuits */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1, 0x1);
+		/* Set LO gain to the selected step */
+		regmap_update_bits(priv->regmap, MT6358_ZCD_CON1,
+				   DL_GAIN_REG_MASK, (gain << 7) | gain);
+		/* Enable AUD_CLK */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON13,
+				   0x1, 0x1);
+		/* Enable Audio DAC R */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON0,
+				   RG_AUDDACRPWRUP_VAUDP15_MASK_SFT |
+				   RG_AUD_DAC_PWR_UP_VA28_MASK_SFT, 0x0006);
+		/* Enable low-noise mode of DAC */
+		regmap_write(priv->regmap, MT6358_AUDDEC_ANA_CON9, 0x0001);
+		/* Switch LOL MUX to audio DAC R */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x3 << 2, 0x1 << 2);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		/* Switch LOL MUX to open */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x3 << 2, 0x0 << 2);
+		/* Disable Audio DAC R */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON0,
+				   RG_AUDDACRPWRUP_VAUDP15_MASK_SFT |
+				   RG_AUD_DAC_PWR_UP_VA28_MASK_SFT, 0x0000);
+		/* Disable AUD_CLK */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON13,
+				   0x1, 0x0);
+		/* Decrease LO gain to minimum */
+		regmap_write(priv->regmap, MT6358_ZCD_CON1, DL_GAIN_N_40DB_REG);
+		/* Disable LO driver core and bias circuits */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1, 0x0);
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON7,
+				   0x1 << 1, 0x0 << 1);
+		/* Disable HP aux CMFB loop, enable HP main CMFB switch */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON9,
+				   0xff << 8, 0x0);
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON9,
+				   0xff << 8, 0x2 << 8);
+		/* Disable IBIST */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON12,
+				   0x1 << 8, 0x1 << 8);
+		/* Disable AUD_ZCD */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON11,
+				   0x7, 0x4);
+		hp_zcd_disable(priv);
+		/* Disable NV regulator (-1.2V) */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON15,
+				   0x1, 0x0);
+		/* Disable cap-less LDOs (1.5V) */
+		regmap_update_bits(priv->regmap, MT6358_AUDDEC_ANA_CON14,
+				   0x1055, 0x0);
+		/* Disable NCP */
+		regmap_update_bits(priv->regmap, MT6358_AUDNCP_CLKDIV_CON3,
+				   0x1, 0x1);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
 static int mt_rcv_event(struct snd_soc_dapm_widget *w,
 			struct snd_kcontrol *kcontrol,
 			int event)
@@ -2032,7 +2161,11 @@ static const struct snd_soc_dapm_widget mt6358_dapm_widgets[] = {
 	SND_SOC_DAPM_DAC("DACR", NULL, SND_SOC_NOPM, 0, 0),
 
 	/* LOL */
-	SND_SOC_DAPM_MUX("LOL Mux", SND_SOC_NOPM, 0, 0, &lo_in_mux_control),
+	SND_SOC_DAPM_MUX_E("LOL Mux", SND_SOC_NOPM, 0, 0,
+			   &lo_in_mux_control,
+			   mt_lo_event,
+			   SND_SOC_DAPM_PRE_PMU |
+			   SND_SOC_DAPM_PRE_PMD),
 
 	SND_SOC_DAPM_SUPPLY("LO Stability Enh", MT6358_AUDDEC_ANA_CON7,
 			    RG_LOOUTPUTSTBENH_VAUDP15_SFT, 0, NULL, 0),
@@ -2219,7 +2352,7 @@ static const struct snd_soc_dapm_route mt6358_dapm_routes[] = {
 	{"DACR", NULL, "DL Power Supply"},
 
 	/* Lineout Path */
-	{"LOL Mux", "Playback", "DACL"},
+	{"LOL Mux", "Playback", "DACR"},
 
 	{"LOL Buffer", NULL, "LOL Mux"},
 	{"LOL Buffer", NULL, "LO Stability Enh"},

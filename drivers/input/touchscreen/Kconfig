@@ -887,6 +887,22 @@ config TOUCHSCREEN_TI_AM335X_TSC
 	  To compile this driver as a module, choose M here: the
 	  module will be called ti_am335x_tsc.
 
+config TOUCHSCREEN_OMNIVISION_TCM
+	tristate "Omnivision TCM TDDI touchscreen"
+	depends on SPI_MASTER
+	select CRC32
+	select FW_LOADER
+	help
+	  Say Y here if you have a display with an Omnivision (formerly
+	  Synaptics) TDDI controller such as the TD4160 whose touch part
+	  speaks the TCM protocol over SPI and needs its firmware downloaded
+	  by the host.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called omnivision_tcm.
+
 config TOUCHSCREEN_PIXCIR
 	tristate "PIXCIR I2C touchscreens"
 	depends on I2C

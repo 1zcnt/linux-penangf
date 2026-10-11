@@ -6,6 +6,7 @@ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769t-xiaomi-lancelot-tianma.dtbo
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769t-xiaomi-lancelot-huaxing.dtbo
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769t-xiaomi-lancelot-ktd.dtbo
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769z-motorola-penangf.dtb
+dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769z-motorola-penangf-dsi.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6769z-xiaomi-merlin.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6779-evb.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-evb.dtb

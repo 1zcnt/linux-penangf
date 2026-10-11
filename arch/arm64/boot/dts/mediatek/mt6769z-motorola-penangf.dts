@@ -24,21 +24,60 @@
 	};
 
 	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * Framebuffer left running by the bootloader. This is the default
+		 * display path: taking the pipeline over with the DSI panel driver
+		 * (see mt6769z-motorola-penangf-dsi.dts) does not come up reliably yet.
+		 */
 		framebuffer0: framebuffer@7b250000 {
-			//compatible = "simple-framebuffer";
+			compatible = "simple-framebuffer";
 			reg = <0 0x7b250000 0 (736*1600*4)>;
 			width = <736>;
 			height = <1600>;
 			stride = <(736 * 4)>;
 			format = "a8r8g8b8";
-			status = "disabled";
-			no-map;
 		};
 	};
 
-	memory@40000000 {
-		device_type = "memory";
-		reg = <0x0 0x40000000 0x0 0x3e605000>;
+	/*
+	 * No reserved-memory nodes here: the stock bootloader reserves the
+	 * framebuffer and pstore regions itself and hangs on purpose if the
+	 * device tree already has a node overlapping one of them. ramoops gets
+	 * its region from the ramoops.* parameters on the command line instead.
+	 */
+
+	/* Downstream: "mediatek,vibrator" with vib_vol = <9>, i.e. VIBR at 2.8 V */
+	haptic {
+		compatible = "regulator-haptic";
+		haptic-supply = <&mt6358_vibr_reg>;
+		min-microvolt = <1200000>;
+		max-microvolt = <2800000>;
+	};
+};
+
+/*
+ * Volume down. Only KPCOL0 is wired; GPIO92 (KPROW0) is the touch reset here.
+ * The controller reports the key as hardware key 1 (the vendor map agrees),
+ * which the driver decodes as row 0, column 1.
+ */
+&keyboard {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&keyboard_pins>;
+	linux,keymap = <MATRIX_KEY(0x00, 0x01, KEY_VOLUMEDOWN)>;
+	keypad,num-rows = <1>;
+	keypad,num-columns = <2>;
+	debounce-delay-ms = <32>;
+};
+
+/* Power is the default; the PMIC "home" key is volume up on this board. */
+&mt6358keys {
+	home {
+		linux,keycodes = <KEY_VOLUMEUP>;
 	};
 };
 
@@ -66,55 +105,76 @@
 	regulator-always-on;
 };
 
+/*
+ * No PSCI idle states. Both cpu-sleep and cluster-sleep are MCDI states that
+ * the firmware expects to coordinate with a kernel-side MCDI driver; without
+ * one, entering either makes USB transfers stall intermittently (the gadget
+ * waits forever for a completion, the host times out after 30 s and resets
+ * the device) and once produced a context-tracking WARN on idle entry.
+ * WFI only is stable.
+ */
 &cci {
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu0 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu1 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu2 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu3 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu4 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu5 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc12_reg>;
 };
 
 &cpu6 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc11_reg>;
 };
 
 &cpu7 {
+	/delete-property/ cpu-idle-states;
 	proc-supply = <&mt6358_vproc11_reg>;
 };
 
 // For some reason devapc (and others?) make the kernel hang
 // at random places and prevents it from booting at all.
 
+/*
+ * penangf shipped with four panels (BOE TD4160, Chipone ICNL9916, Ilitek
+ * ILI9883A and ILI7807S); the bootloader reports the fitted one in
+ * /chosen "atag,videolfb". This describes the BOE TD4160 one; its bias
+ * supplies are wired up in mt6769z-motorola-penangf-dsi.dts.
+ */
 &dsi0 {
-	status = "okay";
+	status = "disabled";
 	#address-cells = <1>;
 	#size-cells = <0>;
 
 	panel: panel@0 {
-		compatible = "chipone,icnl9916";
+		compatible = "boe,td4160";
 		reg = <0>;
-		vddio-supply = <&mt6358_vio18_reg>;
-		power-supply = <&mt6358_vio18_reg>;
+		reset-gpios = <&pio 45 GPIO_ACTIVE_LOW>;
 
 		port {
 			panel_in: endpoint {
@@ -126,6 +186,14 @@
 
 &dsi_out {
 	remote-endpoint = <&panel_in>;
+};
+
+/*
+ * The OVL keeps reading the bootloader framebuffer by physical address, so
+ * with the M4U enabled every read is an IOMMU fault (an interrupt storm).
+ */
+&iommu {
+	status = "disabled";
 };
 
 &gpu {
@@ -198,6 +266,14 @@
 };
 
 &pio {
+	keyboard_pins: keyboard-pins {
+		pins {
+			pinmux = <PINMUX_GPIO93__FUNC_KPCOL0>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+			input-enable;
+		};
+	};
+
 	mmc0_default_pins: mmc0-default-pins {
 		pins-clk {
 			pinmux = <PINMUX_GPIO124__FUNC_MSDC0_CLK>;

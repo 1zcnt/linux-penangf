@@ -1,0 +1,378 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Motorola G13 / G23 with the display driven through DSI and the panel
+ * driver instead of the framebuffer left by the bootloader.
+ */
+
+#include <dt-bindings/iio/adc/mediatek,mt6358-auxadc.h>
+#include "mt6769z-motorola-penangf.dts"
+
+/ {
+	/*
+	 * 5000 mAh cell. Downstream charges it to 4.35 V at up to 2.05 A in
+	 * the normal temperature range; the charger driver starts from the
+	 * chip defaults (4.208 V, 2.04 A), these are the upper limits.
+	 */
+	battery: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion-polymer";
+		charge-full-design-microamp-hours = <5000000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4350000>;
+		precharge-current-microamp = <180000>;
+		charge-term-current-microamp = <240000>;
+		constant-charge-current-max-microamp = <2040000>;
+		constant-charge-voltage-max-microvolt = <4350000>;
+		/* From the vendor gauge profile for this cell (battery 0, 25 degrees C) */
+		factory-internal-resistance-micro-ohms = <140000>;
+		ocv-capacity-celsius = <25>;
+		ocv-capacity-table-0 =
+			<4409000 100>,
+			<4377700 97>,
+			<4347400 94>,
+			<4314100 91>,
+			<4277700 88>,
+			<4241400 85>,
+			<4205100 82>,
+			<4168800 79>,
+			<4133700 76>,
+			<4100400 73>,
+			<4068400 70>,
+			<4037100 67>,
+			<4007800 64>,
+			<3978600 61>,
+			<3940800 58>,
+			<3904400 55>,
+			<3881100 52>,
+			<3862300 48>,
+			<3845600 45>,
+			<3831500 42>,
+			<3817900 39>,
+			<3807300 36>,
+			<3797300 33>,
+			<3788200 30>,
+			<3779500 27>,
+			<3767400 24>,
+			<3754300 21>,
+			<3739700 18>,
+			<3720600 15>,
+			<3699700 12>,
+			<3693400 9>,
+			<3677200 6>,
+			<3527900 3>,
+			<3068000 0>;
+	};
+};
+
+/*
+ * Connectivity (Wi-Fi/BT/GPS/FM in the SoC with an MT6631 radio). There is no
+ * mainline driver; these nodes are what MediaTek's out-of-tree modules
+ * (wmt_drv, btif_drv, wlan_drv_gen4m) look for, taken from the vendor tree.
+ */
+/ {
+	reserved-memory {
+		consys_mem: consys-reserve-memory {
+			compatible = "mediatek,consys-reserve-memory";
+			no-map;
+			size = <0 0x400000>;
+			alignment = <0 0x1000000>;
+			alloc-ranges = <0 0x40000000 0 0x80000000>;
+		};
+
+		wifi_mem: wifi-reserve-memory {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0 0x300000>;
+			alignment = <0 0x1000000>;
+			alloc-ranges = <0 0x40000000 0 0x80000000>;
+		};
+	};
+
+	/*
+	 * Audio front end. Register compatible with the MT8183 one, which the
+	 * driver is derived from; only the path to the PMIC codec is described.
+	 */
+	audsys: clock-controller@11220000 {
+		compatible = "mediatek,mt6768-audsys", "syscon", "simple-mfd";
+		reg = <0 0x11220000 0 0x1000>;
+		#clock-cells = <1>;
+
+		afe: audio-controller {
+			compatible = "mediatek,mt6768-audio";
+			interrupts = <GIC_SPI 169 IRQ_TYPE_LEVEL_LOW>;
+			clocks = <&audsys CLK_AUDIO_AFE>,
+				 <&infracfg_ao CLK_INFRA_AUDIO>,
+				 <&infracfg_ao CLK_INFRA_AUDIO_26M_BCLK>,
+				 <&topckgen CLK_TOP_AUDIO_SEL>,
+				 <&topckgen CLK_TOP_AUD_INTBUS_SEL>,
+				 <&topckgen CLK_TOP_SYSPLL1_D4>,
+				 <&clk26m>,
+				 <&audsys CLK_AUDIO_DAC>,
+				 <&audsys CLK_AUDIO_DAC_PREDIS>,
+				 <&audsys CLK_AUDIO_ADC>,
+				 <&infracfg_ao CLK_INFRA_AUDIO_26M_BCLK>;
+			clock-names = "aud_afe_clk",
+				      "aud_infra_axi_clk",
+				      "aud_infra_26m_clk",
+				      "top_mux_audio",
+				      "top_mux_audio_int",
+				      "top_sys_pll1_d4",
+				      "top_clk26m_clk",
+				      "aud_dac_clk",
+				      "aud_dac_predis_clk",
+				      "aud_adc_clk",
+				      "mtkaif_26m_clk";
+			pinctrl-names = "default";
+			pinctrl-0 = <&aud_pins>;
+		};
+	};
+
+	sound {
+		compatible = "mediatek,mt6768-mt6358-sound";
+		model = "Moto G13";
+		mediatek,platform = <&afe>;
+		aux-devs = <&earpiece_amp>, <&speaker_amp>;
+		widgets = "Speaker", "Earpiece",
+			  "Speaker", "Speaker";
+		audio-routing = "Earpiece Amp IN", "Receiver",
+				"Earpiece", "Earpiece Amp OUT",
+				"Speaker Amp IN", "LINEOUT L",
+				"Speaker", "Speaker Amp OUT";
+	};
+
+	consys@18002000 {
+		compatible = "mediatek,mt6768-consys";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		reg = <0 0x18002000 0 0x1000>,	/* CONN_MCU_CONFIG */
+		      <0 0x10007000 0 0x0100>,	/* TOP_RGU */
+		      <0 0x10001000 0 0x1000>,	/* INFRACFG_AO */
+		      <0 0x10006000 0 0x1000>,	/* SPM */
+		      <0 0x18007000 0 0x1000>,	/* CONN_HIF_ON */
+		      <0 0x180b1000 0 0x1000>,	/* CONN_TOP_MISC_OFF */
+		      <0 0x180a3000 0 0x1000>,	/* CONN_MCU_CFG_ON */
+		      <0 0x180a5000 0 0x0800>,	/* CONN_MCU_CIRQ */
+		      <0 0x180c1000 0 0x1000>,	/* CONN_TOP_MISC_ON */
+		      <0 0x18004000 0 0x1000>;	/* CONN_HIF_PDMA */
+		/*
+		 * Polarities are as seen by the sysirq inverter that mainline
+		 * routes these through, so the opposite of the vendor tree,
+		 * which wires them straight to the GIC.
+		 */
+		interrupts = <GIC_SPI 284 IRQ_TYPE_LEVEL_LOW>,	/* BGF */
+			     <GIC_SPI 78 IRQ_TYPE_LEVEL_LOW>,	/* WDT */
+			     <GIC_SPI 287 IRQ_TYPE_EDGE_FALLING>;	/* conn2ap sw irq */
+		power-domains = <&spm MT6768_POWER_DOMAIN_CONN>;
+		memory-region = <&consys_mem>;
+		wifi_ant_swap_gpio = <&pio 108 0>;
+		vcn18-supply = <&mt6358_vcn18_reg>;
+		vcn28-supply = <&mt6358_vcn28_reg>;
+		vcn33_bt-supply = <&mt6358_vcn33_reg>;
+		vcn33_wifi-supply = <&mt6358_vcn33_reg>;
+	};
+
+	btif@1100c000 {
+		compatible = "mediatek,btif";
+		reg = <0 0x1100c000 0 0x1000>,	/* btif */
+		      <0 0x11000b80 0 0x80>,	/* tx dma */
+		      <0 0x11000c00 0 0x80>;	/* rx dma */
+		interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 115 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 141 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&infracfg_ao CLK_INFRA_BTIF>,
+			 <&infracfg_ao CLK_INFRA_AP_DMA>;
+		clock-names = "btifc", "apdmac";
+	};
+
+	wifi@18000000 {
+		compatible = "mediatek,wifi";
+		reg = <0 0x18000000 0 0x100000>;
+		interrupts = <GIC_SPI 285 IRQ_TYPE_LEVEL_LOW>;
+		memory-region = <&wifi_mem>;
+	};
+};
+
+&framebuffer0 {
+	status = "disabled";
+};
+
+&iommu {
+	status = "okay";
+};
+
+&dsi0 {
+	status = "okay";
+};
+
+/*
+ * Display bias: a TPS65132 compatible charge pump providing the panel's
+ * +/-6 V rails, with one enable line per rail. The bootloader leaves both
+ * rails up.
+ */
+&i2c0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	clock-frequency = <400000>;
+
+	regulator@3e {
+		compatible = "ti,tps65132";
+		reg = <0x3e>;
+
+		lcd_vsp: outp {
+			regulator-name = "lcd_vsp";
+			regulator-min-microvolt = <6000000>;
+			regulator-max-microvolt = <6000000>;
+			regulator-boot-on;
+			enable-gpios = <&pio 169 GPIO_ACTIVE_HIGH>;
+		};
+
+		lcd_vsn: outn {
+			regulator-name = "lcd_vsn";
+			regulator-min-microvolt = <6000000>;
+			regulator-max-microvolt = <6000000>;
+			regulator-boot-on;
+			enable-gpios = <&pio 165 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&panel {
+	vsp-supply = <&lcd_vsp>;
+	vsn-supply = <&lcd_vsn>;
+};
+
+/*
+ * Touch part of the TDDI. It has no firmware storage; the driver downloads
+ * hdl_boe_firmware.img (from the stock vendor partition) after every reset.
+ */
+&spi2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi2_pins>;
+	mediatek,pad-select = <0>;
+
+	touchscreen@0 {
+		compatible = "omnivision,td4160-touch";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		interrupts-extended = <&pio 1 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&pio 92 GPIO_ACTIVE_LOW>;
+		firmware-name = "hdl_boe_firmware.img";
+	};
+};
+
+/* Charger (SGM41543D at 0x0b), Type-C controller (0x60), flash LED driver */
+/* Speaker amplifiers (AW87xxx at 0x58 and 0x59), NFC and a camera sit here */
+&i2c3 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c3_pins>;
+	clock-frequency = <400000>;
+
+	/*
+	 * Pairing as in the vendor mixer paths: device 0 (0x58) takes the
+	 * codec's receiver output, device 1 (0x59) its line output.
+	 */
+	earpiece_amp: amplifier@58 {
+		compatible = "awinic,aw87390";
+		reg = <0x58>;
+		#sound-dai-cells = <0>;
+		awinic,audio-channel = <0>;
+		sound-name-prefix = "Earpiece Amp";
+	};
+
+	speaker_amp: amplifier@59 {
+		compatible = "awinic,aw87390";
+		reg = <0x59>;
+		#sound-dai-cells = <0>;
+		awinic,audio-channel = <1>;
+		sound-name-prefix = "Speaker Amp";
+	};
+};
+
+&i2c7 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7_pins>;
+	clock-frequency = <400000>;
+
+	charger: charger@b {
+		compatible = "sgmicro,sgm41543d";
+		reg = <0x0b>;
+		interrupts-extended = <&pio 20 IRQ_TYPE_EDGE_FALLING>;
+		monitored-battery = <&battery>;
+		/* The PMIC battery monitor below is the battery userspace should see */
+		ti,no-battery-supply;
+		/* What the bootloader sets for a USB data port */
+		input-current-limit-microamp = <1000000>;
+		input-voltage-limit-microvolt = <4600000>;
+	};
+};
+
+&mt6358codec {
+	Avdd-supply = <&mt6358_vaud28_reg>;
+};
+
+&pio {
+	/* MTKAIF link between the SoC's audio front end and the PMIC codec */
+	aud_pins: aud-pins {
+		pins-mosi {
+			pinmux = <PINMUX_GPIO136__FUNC_AUD_CLK_MOSI>,
+				 <PINMUX_GPIO137__FUNC_AUD_SYNC_MOSI>,
+				 <PINMUX_GPIO138__FUNC_AUD_DAT_MOSI0>,
+				 <PINMUX_GPIO139__FUNC_AUD_DAT_MOSI1>;
+			input-schmitt-enable;
+		};
+
+		pins-miso {
+			pinmux = <PINMUX_GPIO140__FUNC_AUD_CLK_MISO>,
+				 <PINMUX_GPIO141__FUNC_AUD_SYNC_MISO>,
+				 <PINMUX_GPIO142__FUNC_AUD_DAT_MISO0>,
+				 <PINMUX_GPIO143__FUNC_AUD_DAT_MISO1>;
+			input-schmitt-enable;
+		};
+	};
+
+	i2c3_pins: i2c3-pins {
+		pins {
+			pinmux = <PINMUX_GPIO50__FUNC_SCL3>,
+				 <PINMUX_GPIO51__FUNC_SDA3>;
+		};
+	};
+
+	i2c7_pins: i2c7-pins {
+		pins {
+			pinmux = <PINMUX_GPIO175__FUNC_SCL7>,
+				 <PINMUX_GPIO176__FUNC_SDA7>;
+		};
+	};
+
+	spi2_pins: spi2-pins {
+		pins {
+			pinmux = <PINMUX_GPIO25__FUNC_SPI2_CSB>,
+				 <PINMUX_GPIO26__FUNC_SPI2_MO>,
+				 <PINMUX_GPIO27__FUNC_SPI2_CLK>,
+				 <PINMUX_GPIO28__FUNC_SPI2_MI>;
+		};
+	};
+
+	i2c0_pins: i2c0-pins {
+		pins {
+			pinmux = <PINMUX_GPIO82__FUNC_SDA0>,
+				 <PINMUX_GPIO83__FUNC_SCL0>;
+		};
+	};
+};
+
+/* Battery voltage and current from the PMIC's fuel-gauge ADC, 5 mOhm sense resistor */
+&pmic {
+	battery-gauge {
+		compatible = "mediatek,mt6358-battery";
+		io-channels = <&pmic_adc MT6358_AUXADC_BATADC>;
+		io-channel-names = "vbat";
+		monitored-battery = <&battery>;
+		shunt-resistor-micro-ohms = <5000>;
+		mediatek,current-gain-permille = <990>;
+	};
+};

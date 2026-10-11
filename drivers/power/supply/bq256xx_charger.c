@@ -1536,16 +1536,38 @@ static const struct bq256xx_chip_info bq256xx_chip_info_tbl[] = {
 	},
 };
 
+/*
+ * Battery monitors fed by this charger. A "power-supplies" phandle to the
+ * charger node cannot be used for this: two supplies are registered for the
+ * one node, and the core's phandle lookup then counts two suppliers for a
+ * one-entry name list.
+ */
+static char *bq256xx_charger_supplied_to[] = {
+	"mt6358-battery",
+};
+
 static int bq256xx_power_supply_init(struct bq256xx_device *bq,
 		struct power_supply_config *psy_cfg, struct device *dev)
 {
+	psy_cfg->supplied_to = bq256xx_charger_supplied_to;
+	psy_cfg->num_supplicants = ARRAY_SIZE(bq256xx_charger_supplied_to);
 	bq->charger = devm_power_supply_register(bq->dev,
 						 &bq256xx_power_supply_desc,
 						 psy_cfg);
+	psy_cfg->supplied_to = NULL;
+	psy_cfg->num_supplicants = 0;
 	if (IS_ERR(bq->charger)) {
 		dev_err(dev, "power supply register charger failed\n");
 		return PTR_ERR(bq->charger);
 	}
+
+	/*
+	 * This driver's own "battery" supply only repeats charge limits. With a
+	 * real battery monitor on the board it shows up in userspace as a second
+	 * battery without a charge level, so allow leaving it out.
+	 */
+	if (device_property_read_bool(dev, "ti,no-battery-supply"))
+		return 0;
 
 	bq->battery = devm_power_supply_register(bq->dev,
 						      &bq256xx_battery_desc,
@@ -1563,6 +1585,18 @@ static int bq256xx_hw_init(struct bq256xx_device *bq)
 	int wd_reg_val = BQ256XX_WATCHDOG_DIS;
 	int ret = 0;
 	int i;
+
+	/*
+	 * The register cache starts from the power-on defaults. That is only
+	 * true if nothing has programmed the charger before us: a bootloader
+	 * that did (and whose values would otherwise be undone by the
+	 * charger's own watchdog) leaves the cache and the hardware disagreeing,
+	 * and writes of "default" values below would then be skipped.
+	 */
+	ret = regmap_write_bits(bq->regmap, BQ256XX_PART_INFORMATION,
+				BQ256XX_REG_RST, BQ256XX_REG_RST);
+	if (ret)
+		return ret;
 
 	for (i = 0; i < BQ256XX_NUM_WD_VAL; i++) {
 		if (bq->watchdog_timer == bq256xx_watchdog_time[i]) {
@@ -1776,6 +1810,7 @@ static const struct i2c_device_id bq256xx_i2c_ids[] = {
 	{ "bq25611d", (kernel_ulong_t)&bq256xx_chip_info_tbl[BQ25611D] },
 	{ "bq25618", (kernel_ulong_t)&bq256xx_chip_info_tbl[BQ25618] },
 	{ "bq25619", (kernel_ulong_t)&bq256xx_chip_info_tbl[BQ25619] },
+	{ "sgm41543d", (kernel_ulong_t)&bq256xx_chip_info_tbl[BQ25601] },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, bq256xx_i2c_ids);
@@ -1788,6 +1823,12 @@ static const struct of_device_id bq256xx_of_match[] = {
 	{ .compatible = "ti,bq25611d", .data = &bq256xx_chip_info_tbl[BQ25611D] },
 	{ .compatible = "ti,bq25618", .data = &bq256xx_chip_info_tbl[BQ25618] },
 	{ .compatible = "ti,bq25619", .data = &bq256xx_chip_info_tbl[BQ25619] },
+	/*
+	 * SG Micro SGM41543D: same register layout and encodings as the
+	 * BQ25601 (60 mA charge current steps, 3.856 V + 32 mV regulation
+	 * voltage steps, 100 mA input limit steps).
+	 */
+	{ .compatible = "sgmicro,sgm41543d", .data = &bq256xx_chip_info_tbl[BQ25601] },
 	{}
 };
 MODULE_DEVICE_TABLE(of, bq256xx_of_match);
